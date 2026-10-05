@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;" />
+  <title>TermiusClone</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <header class="sidebar-head">
+        <h1>TermiusClone</h1>
+        <div class="seg">
+          <button class="seg-btn is-active" data-pane="hosts">Hosts</button>
+          <button class="seg-btn" data-pane="snippets">Snippets</button>
+        </div>
+      </header>
+
+      <section id="pane-hosts" class="pane">
+        <div class="pane-tools">
+          <input id="host-filter" type="search" placeholder="Filter hosts…" autocomplete="off" />
+          <button id="host-new" class="btn btn-primary" title="New host">+</button>
+        </div>
+        <ul id="host-list" class="list"></ul>
+        <footer class="pane-foot">
+          <button id="host-import" class="btn btn-ghost">Import ~/.ssh/config</button>
+          <span class="hint">Double-click to connect · &#9998; to edit</span>
+        </footer>
+      </section>
+
+      <section id="pane-snippets" class="pane is-hidden">
+        <div class="pane-tools">
+          <input id="snippet-filter" type="search" placeholder="Filter snippets…" autocomplete="off" />
+          <button id="snippet-new" class="btn btn-primary" title="New snippet">+</button>
+        </div>
+        <ul id="snippet-list" class="list"></ul>
+        <footer class="pane-foot">
+          <span class="hint">Click to run in the active tab · &#9998; to edit</span>
+        </footer>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="tabbar">
+        <div id="tabs" class="tabs"></div>
+      </div>
+      <div id="terminals" class="terminals">
+        <div id="empty" class="empty">
+          <h2>No active session</h2>
+          <p>Pick a host on the left and press <kbd>Enter</kbd>, or double-click it, to connect.</p>
+          <p class="muted">Keys are passed straight through as <code>ssh -i /path/to/key.pem</code>.</p>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span id="status">Ready</span>
+        <span id="config-path" class="muted"></span>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="host-dialog" class="dialog">
+    <form id="host-form" method="dialog">
+      <h2 id="host-dialog-title">New host</h2>
+      <div class="grid">
+        <label>Label<input name="label" placeholder="prod-web" /></label>
+        <label>Group<input name="group" placeholder="AWS" /></label>
+        <label class="col-2">Hostname <span class="label-hint">— or paste a whole <code>ssh&nbsp;-i&nbsp;key.pem&nbsp;user@host</code> line and it will be split up</span>
+          <input name="hostname" required placeholder="ec2-35-0-0-1.compute.amazonaws.com" />
+        </label>
+        <label>Username<input name="username" placeholder="ubuntu" /></label>
+        <label>Port<input name="port" type="number" min="1" max="65535" value="22" /></label>
+        <div class="field col-2">Authentication
+          <span class="radios">
+            <label><input type="radio" name="authMethod" value="key" checked /> Key file</label>
+            <label><input type="radio" name="authMethod" value="password" /> Password</label>
+            <label><input type="radio" name="authMethod" value="default" /> Agent / ssh defaults</label>
+          </span>
+        </div>
+
+        <label class="col-2 auth-field" data-auth="key">Private key file <span class="label-hint">— Browse… resolves the full path</span>
+          <span class="row">
+            <input name="identityFile" placeholder="~/.ssh/ubuntukeypair.pem" />
+            <button type="button" id="key-browse" class="btn btn-ghost">Browse…</button>
+          </span>
+        </label>
+
+        <label class="col-2 auth-field is-hidden" data-auth="password">Password
+          <span class="row">
+            <input name="password" type="password" autocomplete="off" spellcheck="false" placeholder="Stored encrypted via the OS keyring" />
+            <button type="button" id="password-reveal" class="btn btn-ghost">Show</button>
+            <button type="button" id="password-clear" class="btn btn-ghost">Clear</button>
+          </span>
+          <span id="password-state" class="label-hint"></span>
+        </label>
+        <label class="col-2">Jump host (ProxyJump)<input name="jumpHost" placeholder="bastion.example.com" /></label>
+        <label class="col-2">Extra ssh arguments<input name="extraArgs" placeholder="-L 8080:localhost:80" /></label>
+        <label class="col-2 check"><input name="forwardAgent" type="checkbox" /> Forward SSH agent (-A)</label>
+      </div>
+      <pre id="host-preview" class="preview"></pre>
+      <div id="host-error" class="error is-hidden"></div>
+      <menu class="dialog-actions">
+        <button type="button" id="host-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="host-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="snippet-dialog" class="dialog">
+    <form id="snippet-form" method="dialog">
+      <h2 id="snippet-dialog-title">New snippet</h2>
+      <div class="grid">
+        <label class="col-2">Name<input name="name" required placeholder="Restart nginx" /></label>
+        <label class="col-2">Tags<input name="tags" placeholder="nginx, ops" /></label>
+        <label class="col-2">Command<textarea name="command" rows="6" required placeholder="sudo systemctl restart nginx"></textarea></label>
+      </div>
+      <div id="snippet-error" class="error is-hidden"></div>
+      <menu class="dialog-actions">
+        <button type="button" id="snippet-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="snippet-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
