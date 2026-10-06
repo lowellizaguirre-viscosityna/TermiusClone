@@ -8,7 +8,9 @@ const THEME = {
   background: '#11141b',
   foreground: '#dfe4ee',
   cursor: '#4c8dff',
-  selectionBackground: '#2b4a86',
+  selectionBackground: '#3a6bc4',
+  selectionForeground: '#ffffff',
+  selectionInactiveBackground: '#2b4a86',
   black: '#11141b', red: '#e06c75', green: '#7fd18b', yellow: '#e5c07b',
   blue: '#4c8dff', magenta: '#c678dd', cyan: '#56b6c2', white: '#dfe4ee',
   brightBlack: '#5c6370', brightRed: '#ef7a82', brightGreen: '#98c379',
@@ -201,8 +203,8 @@ function renderSnippets() {
     row.addEventListener('click', () => {
       state.selectedSnippetId = snippet.id;
       selectRow(el.snippetList, row);
-      runSnippet(snippet);
     });
+    row.addEventListener('dblclick', () => runSnippet(snippet));
     el.snippetList.append(row);
   }
 }
@@ -238,6 +240,71 @@ function activate(sessionId) {
   el.empty.classList.toggle('is-hidden', state.tabs.length > 0);
 }
 
+/* ── Terminal font size (Ctrl+wheel, Ctrl+= / Ctrl+-) ─────────────────── */
+
+const FONT_MIN = 6;
+const FONT_MAX = 40;
+const FONT_DEFAULT = 13;
+
+function loadFontSize() {
+  const stored = Number(localStorage.getItem('term.fontSize'));
+  return Number.isFinite(stored) && stored >= FONT_MIN && stored <= FONT_MAX ? stored : FONT_DEFAULT;
+}
+
+let fontSize = loadFontSize();
+
+function setFontSize(next) {
+  const clamped = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(next)));
+  if (clamped === fontSize) return;
+  fontSize = clamped;
+  localStorage.setItem('term.fontSize', String(fontSize));
+  for (const tab of state.tabs) {
+    tab.term.options.fontSize = fontSize;
+    tab.fit.fit();
+    if (tab.alive) window.api.session.resize(tab.sessionId, tab.term.cols, tab.term.rows);
+  }
+  setStatus(`Font size ${fontSize}px`);
+}
+
+/* ── Clipboard ────────────────────────────────────────────────────────── */
+
+function copySelection(term) {
+  const text = term.getSelection();
+  if (!text) return false;
+  window.api.clipboard.write(text);
+  return true;
+}
+
+function pasteClipboard(term, sessionId) {
+  const text = window.api.clipboard.read();
+  if (text) window.api.session.input(sessionId, text);
+  term.focus();
+}
+
+/**
+ * Ctrl+A select all, Ctrl+C copy (falls through to SIGINT with no selection),
+ * Ctrl+V paste, Ctrl+Shift+C/V as the usual terminal equivalents.
+ * Returning false tells xterm to swallow the key instead of sending it to the pty.
+ */
+function wireTerminalKeys(term, sessionId) {
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true;
+    const key = event.key.toLowerCase();
+
+    if (key === 'a' && !event.shiftKey) { term.selectAll(); return false; }
+    if (key === 'c') {
+      if (!copySelection(term) && !event.shiftKey) return true; // no selection → let ^C through
+      term.clearSelection();
+      return false;
+    }
+    if (key === 'v') { pasteClipboard(term, sessionId); return false; }
+    if (key === '=' || key === '+') { setFontSize(fontSize + 1); return false; }
+    if (key === '-' || key === '_') { setFontSize(fontSize - 1); return false; }
+    if (key === '0') { setFontSize(FONT_DEFAULT); return false; }
+    return true;
+  });
+}
+
 function closeTab(sessionId) {
   const i = state.tabs.findIndex((t) => t.sessionId === sessionId);
   if (i === -1) return;
@@ -259,10 +326,11 @@ async function connect(host) {
 
   const term = new Terminal({
     fontFamily: 'ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", Menlo, monospace',
-    fontSize: 13,
+    fontSize,
     cursorBlink: true,
     scrollback: 10000,
     allowProposedApi: true,
+    rightClickSelectsWord: true,
     theme: THEME
   });
   const fit = new FitAddon();
@@ -270,6 +338,12 @@ async function connect(host) {
   term.loadAddon(new WebLinksAddon());
   term.open(container);
   fit.fit();
+
+  container.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    setFontSize(fontSize + (event.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
 
   let started;
   try {
@@ -295,6 +369,12 @@ async function connect(host) {
   const tab = { sessionId, hostLabel: host.label, term, fit, el: container, tabEl, alive: true };
   state.tabs.push(tab);
 
+  term.onSelectionChange(() => {
+    const n = term.getSelection().length;
+    if (n) setStatus(`${n} character${n === 1 ? '' : 's'} selected — Ctrl+C to copy`);
+  });
+
+  wireTerminalKeys(term, sessionId);
   term.onData((data) => window.api.session.input(sessionId, data));
   term.onResize(({ cols, rows }) => window.api.session.resize(sessionId, cols, rows));
 

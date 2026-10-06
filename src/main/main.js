@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 
@@ -23,7 +23,14 @@ let mainWindow = null;
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icons', 'icon-256.png');
 
+// Electron's default menu claims Ctrl+A (selectAll), Ctrl+C and Ctrl+V as
+// accelerators. Accelerators fire before the page sees the keydown, so the
+// terminal's own handlers never ran -- and the default selectAll targets the
+// DOM, which xterm marks user-select:none, so nothing highlighted. The menu is
+// hidden anyway (autoHideMenuBar), so drop it entirely.
 function createWindow() {
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     icon: ICON,
     width: 1280,

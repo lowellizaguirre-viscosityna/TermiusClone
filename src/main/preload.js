@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, clipboard, ipcRenderer } = require('electron');
 
 const listeners = new Map();
 
@@ -12,6 +12,10 @@ function on(channel, cb) {
 }
 
 contextBridge.exposeInMainWorld('api', {
+  clipboard: {
+    read: () => clipboard.readText(),
+    write: (text) => clipboard.writeText(text)
+  },
   config: {
     load: () => ipcRenderer.invoke('config:load'),
     path: () => ipcRenderer.invoke('config:path'),
