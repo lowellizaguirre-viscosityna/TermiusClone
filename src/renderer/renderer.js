@@ -275,9 +275,11 @@ function copySelection(term) {
   return true;
 }
 
-function pasteClipboard(term, sessionId) {
+function pasteClipboard(term) {
   const text = window.api.clipboard.read();
-  if (text) window.api.session.input(sessionId, text);
+  // term.paste() routes through onData, so the pty sees it once, wrapped in
+  // bracketed-paste markers when the remote shell asked for them.
+  if (text) term.paste(text);
   term.focus();
 }
 
@@ -286,21 +288,24 @@ function pasteClipboard(term, sessionId) {
  * Ctrl+V paste, Ctrl+Shift+C/V as the usual terminal equivalents.
  * Returning false tells xterm to swallow the key instead of sending it to the pty.
  */
-function wireTerminalKeys(term, sessionId) {
+function wireTerminalKeys(term) {
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true;
     const key = event.key.toLowerCase();
+    // Swallowing the key in xterm is not enough: the browser default for
+    // Ctrl+C/Ctrl+V still fires, which would copy or paste a second time.
+    const handled = () => { event.preventDefault(); return false; };
 
-    if (key === 'a' && !event.shiftKey) { term.selectAll(); return false; }
+    if (key === 'a' && !event.shiftKey) { term.selectAll(); return handled(); }
     if (key === 'c') {
       if (!copySelection(term) && !event.shiftKey) return true; // no selection → let ^C through
       term.clearSelection();
-      return false;
+      return handled();
     }
-    if (key === 'v') { pasteClipboard(term, sessionId); return false; }
-    if (key === '=' || key === '+') { setFontSize(fontSize + 1); return false; }
-    if (key === '-' || key === '_') { setFontSize(fontSize - 1); return false; }
-    if (key === '0') { setFontSize(FONT_DEFAULT); return false; }
+    if (key === 'v') { pasteClipboard(term); return handled(); }
+    if (key === '=' || key === '+') { setFontSize(fontSize + 1); return handled(); }
+    if (key === '-' || key === '_') { setFontSize(fontSize - 1); return handled(); }
+    if (key === '0') { setFontSize(FONT_DEFAULT); return handled(); }
     return true;
   });
 }
@@ -374,7 +379,7 @@ async function connect(host) {
     if (n) setStatus(`${n} character${n === 1 ? '' : 's'} selected — Ctrl+C to copy`);
   });
 
-  wireTerminalKeys(term, sessionId);
+  wireTerminalKeys(term);
   term.onData((data) => window.api.session.input(sessionId, data));
   term.onResize(({ cols, rows }) => window.api.session.resize(sessionId, cols, rows));
 
