@@ -9,6 +9,7 @@ const sshcmd = require('./sshcmd');
 const sessions = require('./sessions');
 const { parseSshConfig } = require('./sshconfig');
 const secrets = require('./secrets');
+const hostkeys = require('./hostkeys');
 
 // Point safeStorage at the desktop keyring; without this Chromium may pick its
 // "basic_text" fallback, which only obfuscates. Must run before app is ready.
@@ -72,6 +73,7 @@ function wrap(handler) {
 ipcMain.handle('config:load', wrap(() => store.readPublic()));
 ipcMain.handle('config:path', wrap(() => store.CONFIG_FILE));
 ipcMain.handle('secrets:status', wrap(() => secrets.status()));
+ipcMain.handle('config:sshpass', wrap(() => Boolean(sshcmd.findSshpass())));
 ipcMain.handle('config:reveal', wrap(() => shell.showItemInFolder(store.CONFIG_FILE)));
 
 ipcMain.handle('hosts:save', wrap((host) => {
@@ -119,6 +121,11 @@ ipcMain.handle('keys:pick', wrap(async () => {
   if (result.canceled || !result.filePaths.length) return null;
   return sshcmd.inspectIdentity(result.filePaths[0]);
 }));
+
+ipcMain.handle('hostkeys:scan', wrap((hostname, port) => hostkeys.scan(hostname, port)));
+ipcMain.handle('hostkeys:existing', wrap((hostname, port) => hostkeys.existing(hostname, port)));
+ipcMain.handle('hostkeys:trust', wrap((hostname, port, lines) => hostkeys.trust(hostname, port, lines)));
+ipcMain.handle('hostkeys:forget', wrap((hostname, port) => hostkeys.forget(hostname, port)));
 
 ipcMain.handle('keys:inspect', wrap((p) => sshcmd.inspectIdentity(p)));
 ipcMain.handle('keys:fixPermissions', wrap((p) => sshcmd.chmodIdentity(p)));

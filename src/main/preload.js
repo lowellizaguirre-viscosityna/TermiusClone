@@ -20,7 +20,8 @@ contextBridge.exposeInMainWorld('api', {
     load: () => ipcRenderer.invoke('config:load'),
     path: () => ipcRenderer.invoke('config:path'),
     reveal: () => ipcRenderer.invoke('config:reveal'),
-    secretsStatus: () => ipcRenderer.invoke('secrets:status')
+    secretsStatus: () => ipcRenderer.invoke('secrets:status'),
+    hasSshpass: () => ipcRenderer.invoke('config:sshpass')
   },
   hosts: {
     save: (host) => ipcRenderer.invoke('hosts:save', host),
@@ -37,6 +38,12 @@ contextBridge.exposeInMainWorld('api', {
     pick: () => ipcRenderer.invoke('keys:pick'),
     inspect: (p) => ipcRenderer.invoke('keys:inspect', p),
     fixPermissions: (p) => ipcRenderer.invoke('keys:fixPermissions', p)
+  },
+  hostkeys: {
+    scan: (hostname, port) => ipcRenderer.invoke('hostkeys:scan', hostname, port),
+    existing: (hostname, port) => ipcRenderer.invoke('hostkeys:existing', hostname, port),
+    trust: (hostname, port, lines) => ipcRenderer.invoke('hostkeys:trust', hostname, port, lines),
+    forget: (hostname, port) => ipcRenderer.invoke('hostkeys:forget', hostname, port)
   },
   session: {
     start: (host, size) => ipcRenderer.invoke('session:start', host, size),

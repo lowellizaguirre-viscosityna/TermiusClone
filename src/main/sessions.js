@@ -3,6 +3,7 @@
 const pty = require('node-pty');
 const crypto = require('crypto');
 const { buildCommand } = require('./sshcmd');
+const { describeExit } = require('./exitcodes');
 
 const sessions = new Map(); // sessionId -> { proc, host, webContents }
 
@@ -58,7 +59,18 @@ function start(webContents, host, size, password) {
   proc.onExit(({ exitCode, signal }) => {
     pendingPassword = null;
     sessions.delete(sessionId);
-    emit(webContents, 'session:exit', { sessionId, exitCode, signal });
+    // sshpass says why it failed only through the exit status, so translate it
+    // here where cmd.method is known -- the renderer must not guess.
+    const reason = describeExit(exitCode, signal, cmd.method);
+    emit(webContents, 'session:exit', {
+      sessionId,
+      exitCode,
+      signal,
+      method: cmd.method,
+      reason: reason.text,
+      reasonCode: reason.code,
+      fatal: reason.fatal
+    });
   });
 
   sessions.set(sessionId, { proc, host, webContents });

@@ -19,6 +19,9 @@ const THEME = {
 };
 
 let secretsStatus = null;
+// Only under sshpass can an untrusted host key kill a session outright, so the
+// host-key pre-flight is gated on it.
+let hasSshpass = false;
 
 const state = {
   hosts: [],
@@ -324,6 +327,7 @@ function closeTab(sessionId) {
 
 async function connect(host) {
   setStatus(`Connecting to ${host.label}…`);
+  if (!(await ensureHostKey(host))) return;
 
   const container = document.createElement('div');
   container.className = 'term-host is-hidden';
@@ -371,7 +375,9 @@ async function connect(host) {
   tabEl.addEventListener('click', () => activate(sessionId));
   el.tabs.append(tabEl);
 
-  const tab = { sessionId, hostLabel: host.label, term, fit, el: container, tabEl, alive: true };
+  // `host` is kept so a recoverable failure (an untrusted host key) can offer
+  // to fix the cause and reconnect without the user retyping anything.
+  const tab = { sessionId, hostLabel: host.label, host, term, fit, el: container, tabEl, alive: true };
   state.tabs.push(tab);
 
   term.onSelectionChange(() => {
@@ -413,13 +419,154 @@ window.api.session.onData(({ sessionId, data }) => {
   if (tab) tab.term.write(data);
 });
 
-window.api.session.onExit(({ sessionId, exitCode }) => {
+/** Render a scanned key as one line the user can compare against the server. */
+function describeKeys(keys) {
+  return keys.map((k) => `  ${k.keytype} ${k.bits ? `(${k.bits} bit) ` : ''}${k.hash || '[fingerprint unavailable]'}`).join('\n');
+}
+
+/**
+ * Show the fingerprint prompt that plain ssh would have shown, and on an accept
+ * trust the exact keys displayed. Returns true if the host is now trusted.
+ */
+async function trustHostKey(host) {
+  let scanned;
+  try {
+    scanned = unwrap(await window.api.hostkeys.scan(host.hostname, host.port));
+  } catch (err) {
+    setStatus(`Could not fetch host keys from ${host.hostname}: ${err.message}`, 'error');
+    return false;
+  }
+
+  const accept = window.confirm(
+    `${scanned.host} is not in known_hosts.\n\n`
+    + `It is offering these host keys:\n${describeKeys(scanned.keys)}\n\n`
+    + 'Verify a fingerprint against the server itself before accepting — on the '
+    + 'server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`.\n\n'
+    + `Add ${scanned.host} to known_hosts and continue?`
+  );
+  if (!accept) {
+    setStatus('Host key not accepted — connection abandoned.', 'error');
+    return false;
+  }
+
+  try {
+    const added = unwrap(await window.api.hostkeys.trust(host.hostname, host.port, scanned.keys.map((k) => k.line)));
+    setStatus(`Trusted ${added.added} host key${added.added === 1 ? '' : 's'} for ${added.host}`, 'ok');
+    return true;
+  } catch (err) {
+    setStatus(`Could not write known_hosts: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+/**
+ * Ask about an unknown host key *before* connecting, so the first attempt at a
+ * password host does not have to fail with a bare "exit 6" to get the question
+ * asked. Only sshpass needs this -- plain ssh asks on the terminal itself.
+ *
+ * Returns false only on a deliberate refusal: if the host cannot be scanned we
+ * let the connection go ahead, so ssh reports the real problem (wrong address,
+ * firewall, host down) instead of this check guessing at it.
+ */
+async function ensureHostKey(host) {
+  const usesSshpass = (host.authMethod || (host.identityFile ? 'key' : 'default')) === 'password' && hasSshpass;
+  if (!usesSshpass || !host.hostname) return true;
+
+  let known;
+  try {
+    known = unwrap(await window.api.hostkeys.existing(host.hostname, host.port));
+  } catch {
+    return true; // known_hosts unreadable -- let ssh be the one to complain.
+  }
+  if (known) return true;
+
+  setStatus(`${host.hostname} is not in known_hosts — checking its host key…`);
+  let scanned;
+  try {
+    scanned = unwrap(await window.api.hostkeys.scan(host.hostname, host.port));
+  } catch {
+    return true; // unreachable; the connection attempt will say why.
+  }
+  if (!scanned || !scanned.keys.length) return true;
+  return trustHostKey(host);
+}
+
+/**
+ * Exit 6: the session died because the key was never trusted. The pre-flight
+ * normally gets there first, so this is the fallback -- the key can also go
+ * missing between the check and the connection.
+ */
+async function offerHostKeyTrust(tab) {
+  if (!(await trustHostKey(tab.host))) return;
+  const host = tab.host;
+  closeTab(tab.sessionId);
+  await connect(host);
+}
+
+/**
+ * Exit 7: the stored key no longer matches. This is what a man-in-the-middle
+ * looks like, so it is never a one-click fix -- the old entry has to be dropped
+ * deliberately, and only after the user has seen both fingerprints.
+ */
+async function reportChangedHostKey(tab) {
+  const host = tab.host;
+  let scanned;
+  let stored;
+  try {
+    scanned = unwrap(await window.api.hostkeys.scan(host.hostname, host.port));
+    stored = unwrap(await window.api.hostkeys.existing(host.hostname, host.port));
+  } catch (err) {
+    setStatus(`Host key changed for ${host.hostname}, and the keys could not be read: ${err.message}`, 'error');
+    return;
+  }
+
+  const replace = window.confirm(
+    `WARNING: the host key for ${host.hostname} has CHANGED.\n\n`
+    + `known_hosts has:\n${stored ? describeKeys(stored.keys) : '  (no entry found)'}\n\n`
+    + `The server is now offering:\n${describeKeys(scanned.keys)}\n\n`
+    + 'This happens after a legitimate rebuild or reinstall — but it is also exactly '
+    + 'what an intercepted connection looks like. Do not continue unless you know why it changed.\n\n'
+    + 'Remove the old entry and trust the new key?'
+  );
+  if (!replace) {
+    setStatus('Host key change rejected — connection abandoned.', 'error');
+    return;
+  }
+
+  try {
+    unwrap(await window.api.hostkeys.forget(host.hostname, host.port));
+    unwrap(await window.api.hostkeys.trust(host.hostname, host.port, scanned.keys.map((k) => k.line)));
+  } catch (err) {
+    setStatus(`Could not update known_hosts: ${err.message}`, 'error');
+    return;
+  }
+  closeTab(tab.sessionId);
+  await connect(host);
+}
+
+window.api.session.onExit(({ sessionId, exitCode, signal, reason, reasonCode }) => {
   const tab = state.tabs.find((t) => t.sessionId === sessionId);
   if (!tab) return;
   tab.alive = false;
   tab.tabEl.classList.add('is-dead');
-  tab.term.write(`\r\n\x1b[90m[session closed — exit ${exitCode}]\x1b[0m\r\n`);
-  if (sessionId === state.activeSessionId) setStatus(`${tab.hostLabel} disconnected (exit ${exitCode})`, 'error');
+
+  // The exit status alone is the whole error message under sshpass, so always
+  // print the explanation next to it rather than leaving a bare number.
+  const label = signal ? `signal ${signal}` : `exit ${exitCode}`;
+  tab.term.write(`\r\n\x1b[90m[session closed — ${label}]\x1b[0m\r\n`);
+  if (reason) tab.term.write(`\x1b[91m${reason}\x1b[0m\r\n`);
+  if (reasonCode === 'BAD_PASSWORD') {
+    tab.term.write('\x1b[90mEdit the host to update the saved password.\x1b[0m\r\n');
+  }
+
+  if (sessionId === state.activeSessionId) {
+    const bad = Boolean(reason) || exitCode !== 0 || Boolean(signal);
+    setStatus(reason || `${tab.hostLabel} disconnected (${label})`, bad ? 'error' : undefined);
+  }
+
+  if (!tab.host) return;
+  if (reasonCode === 'UNKNOWN_HOST_KEY') offerHostKeyTrust(tab);
+  else if (reasonCode === 'CHANGED_HOST_KEY') reportChangedHostKey(tab);
 });
 
 // ---------------------------------------------------------------- host dialog
@@ -715,6 +862,7 @@ window.addEventListener('keydown', (event) => {
   try {
     el.configPath.textContent = unwrap(await window.api.config.path());
     secretsStatus = unwrap(await window.api.config.secretsStatus());
+    hasSshpass = unwrap(await window.api.config.hasSshpass());
     await refresh();
     setStatus('Ready');
   } catch (err) {
