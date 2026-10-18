@@ -101,7 +101,8 @@ function normalizeHost(input) {
     jumpHost: String(merged.jumpHost || '').trim(),
     extraArgs: String(merged.extraArgs || '').trim(),
     forwardAgent: Boolean(merged.forwardAgent),
-    onConnectSnippetId: input.onConnectSnippetId || ''
+    onConnectSnippetId: input.onConnectSnippetId || '',
+    themeId: String(input.themeId || '').trim()
   };
 }
 

@@ -48,6 +48,7 @@
     <main class="main">
       <div class="tabbar">
         <div id="tabs" class="tabs"></div>
+        <select id="theme-switch" class="theme-switch is-hidden" title="Color scheme for this session"></select>
       </div>
       <div id="terminals" class="terminals">
         <div id="empty" class="empty">
@@ -100,6 +101,9 @@
         <label class="col-2">Jump host (ProxyJump)<input name="jumpHost" placeholder="bastion.example.com" /></label>
         <label class="col-2">Extra ssh arguments<input name="extraArgs" placeholder="-L 8080:localhost:80" /></label>
         <label class="col-2 check"><input name="forwardAgent" type="checkbox" /> Forward SSH agent (-A)</label>
+        <label class="col-2">Color scheme <span class="label-hint">— leave on “Automatic” to assign one by list position</span>
+          <select name="themeId" id="host-theme"></select>
+        </label>
       </div>
       <pre id="host-preview" class="preview"></pre>
       <div id="host-error" class="error is-hidden"></div>
