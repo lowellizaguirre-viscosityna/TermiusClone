@@ -691,9 +691,55 @@ function closeTab(sessionId) {
   activate(next ? next.sessionId : null);
 }
 
+/** Two host records point at the same server when they share an id, or (for
+ *  unsaved/ad-hoc hosts) the same address, port and user. */
+function sameServer(a, b) {
+  if (!a || !b) return false;
+  if (a.id && b.id) return a.id === b.id;
+  return a.hostname === b.hostname && (a.port || 22) === (b.port || 22) && a.username === b.username;
+}
+
+/** The open tab for this server, if any — live or dead. */
+function findTabForHost(host) {
+  return state.tabs.find((t) => sameServer(t.host, host));
+}
+
+/** Fire the host's on-connect snippet once the shell has had a moment to settle. */
+function maybeRunOnConnect(host) {
+  if (!host.onConnectSnippetId) return;
+  const snippet = state.snippets.find((s) => s.id === host.onConnectSnippetId);
+  if (snippet) setTimeout(() => runSnippet(snippet), 600);
+}
+
+/** Verify the host key, then start the backend session for this terminal.
+ *  Returns the started session, or null when the attempt was aborted/failed
+ *  (the reason is already shown to the user). */
+async function startSession(host, term) {
+  if (!(await ensureHostKey(host))) return null;
+  try {
+    return unwrap(await window.api.session.start(host, { cols: term.cols, rows: term.rows }));
+  } catch (err) {
+    await reportConnectError(err, host);
+    return null;
+  }
+}
+
 async function connect(host) {
+  // One tab per server: if there is already a tab for this host, don't open a
+  // second one. A live session is simply brought to the front; a dead one is
+  // reconnected in place, reusing its terminal and scrollback.
+  const existing = findTabForHost(host);
+  if (existing) {
+    if (existing.alive) {
+      activate(existing.sessionId);
+      setStatus(`Already connected to ${host.label}`);
+      return;
+    }
+    await reconnectTab(existing, host);
+    return;
+  }
+
   setStatus(`Connecting to ${host.label}…`);
-  if (!(await ensureHostKey(host))) return;
 
   const container = document.createElement('div');
   container.className = 'term-host is-hidden';
@@ -720,30 +766,26 @@ async function connect(host) {
     setFontSize(fontSize + (event.deltaY < 0 ? 1 : -1));
   }, { passive: false });
 
-  let started;
-  try {
-    started = unwrap(await window.api.session.start(host, { cols: term.cols, rows: term.rows }));
-  } catch (err) {
+  const started = await startSession(host, term);
+  if (!started) {
     term.dispose();
     container.remove();
-    await reportConnectError(err, host);
     return;
   }
 
-  const { sessionId, command } = started;
+  // `host` is kept so a recoverable failure (an untrusted host key) can offer
+  // to fix the cause and reconnect without the user retyping anything.
+  const tab = { sessionId: started.sessionId, hostLabel: host.label, host, term, fit, el: container, tabEl: null, alive: true, themeId: themeFor(host).id };
 
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.append(Object.assign(document.createElement('span'), { textContent: host.label }));
   const close = Object.assign(document.createElement('button'), { className: 'tab-close', textContent: '×', title: 'Close session' });
-  close.addEventListener('click', (event) => { event.stopPropagation(); closeTab(sessionId); });
+  close.addEventListener('click', (event) => { event.stopPropagation(); closeTab(tab.sessionId); });
   tabEl.append(close);
-  tabEl.addEventListener('click', () => activate(sessionId));
+  tabEl.addEventListener('click', () => activate(tab.sessionId));
   el.tabs.append(tabEl);
-
-  // `host` is kept so a recoverable failure (an untrusted host key) can offer
-  // to fix the cause and reconnect without the user retyping anything.
-  const tab = { sessionId, hostLabel: host.label, host, term, fit, el: container, tabEl, alive: true, themeId: themeFor(host).id };
+  tab.tabEl = tabEl;
   state.tabs.push(tab);
 
   term.onSelectionChange(() => {
@@ -752,16 +794,32 @@ async function connect(host) {
   });
 
   wireTerminalKeys(term);
-  term.onData((data) => window.api.session.input(sessionId, data));
-  term.onResize(({ cols, rows }) => window.api.session.resize(sessionId, cols, rows));
+  // Handlers read tab.sessionId (not a captured id) so a reconnect that swaps
+  // in a new backend session keeps routing input through the same terminal.
+  term.onData((data) => window.api.session.input(tab.sessionId, data));
+  term.onResize(({ cols, rows }) => window.api.session.resize(tab.sessionId, cols, rows));
 
-  activate(sessionId);
-  setStatus(command);
+  activate(tab.sessionId);
+  setStatus(started.command);
+  maybeRunOnConnect(host);
+}
 
-  if (host.onConnectSnippetId) {
-    const snippet = state.snippets.find((s) => s.id === host.onConnectSnippetId);
-    if (snippet) setTimeout(() => runSnippet(snippet), 600);
-  }
+/** Revive a tab whose session has ended, reusing its terminal in place. */
+async function reconnectTab(tab, host) {
+  setStatus(`Reconnecting to ${host.label}…`);
+  const started = await startSession(host, tab.term);
+  if (!started) return;
+
+  tab.sessionId = started.sessionId;
+  tab.host = host;
+  tab.hostLabel = host.label;
+  tab.alive = true;
+  tab.tabEl.classList.remove('is-dead');
+  tab.term.write('\r\n\x1b[90m[reconnected]\x1b[0m\r\n');
+
+  activate(tab.sessionId);
+  setStatus(started.command);
+  maybeRunOnConnect(host);
 }
 
 /** Offer the one-click fix for the classic "permissions are too open" refusal. */
