@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('api', {
     save: (snippet) => ipcRenderer.invoke('snippets:save', snippet),
     remove: (id) => ipcRenderer.invoke('snippets:delete', id)
   },
+  aliases: {
+    read: () => ipcRenderer.invoke('aliases:read')
+  },
   keys: {
     pick: () => ipcRenderer.invoke('keys:pick'),
     inspect: (p) => ipcRenderer.invoke('keys:inspect', p),
