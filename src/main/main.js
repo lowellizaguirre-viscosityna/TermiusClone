@@ -10,6 +10,7 @@ const sessions = require('./sessions');
 const { parseSshConfig } = require('./sshconfig');
 const secrets = require('./secrets');
 const hostkeys = require('./hostkeys');
+const aliases = require('./aliases');
 
 // Point safeStorage at the desktop keyring; without this Chromium may pick its
 // "basic_text" fallback, which only obfuscates. Must run before app is ready.
@@ -74,6 +75,7 @@ ipcMain.handle('config:load', wrap(() => store.readPublic()));
 ipcMain.handle('config:path', wrap(() => store.CONFIG_FILE));
 ipcMain.handle('secrets:status', wrap(() => secrets.status()));
 ipcMain.handle('config:sshpass', wrap(() => Boolean(sshcmd.findSshpass())));
+ipcMain.handle('aliases:read', wrap(() => aliases.readAliases()));
 ipcMain.handle('config:reveal', wrap(() => shell.showItemInFolder(store.CONFIG_FILE)));
 
 ipcMain.handle('hosts:save', wrap((host) => {

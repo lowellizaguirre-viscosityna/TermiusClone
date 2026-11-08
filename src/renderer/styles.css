@@ -31,12 +31,25 @@ html, body {
 
 .sidebar {
   width: 272px;
-  min-width: 272px;
+  min-width: 180px;
+  max-width: 70vw;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
 }
+
+.sidebar-resizer {
+  flex: 0 0 auto;
+  width: 6px;
+  margin: 0 -3px;           /* widen the hit area without shifting layout */
+  cursor: col-resize;
+  background: transparent;
+  z-index: 5;
+}
+.sidebar-resizer:hover, .sidebar-resizer.is-dragging { background: var(--accent); }
+body.is-resizing { cursor: col-resize; user-select: none; }
 
 .sidebar-head { padding: 12px 12px 8px; border-bottom: 1px solid var(--border); }
 .sidebar-head h1 { margin: 0 0 10px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }

@@ -336,6 +336,7 @@ let hasSshpass = false;
 const state = {
   hosts: [],
   snippets: [],
+  aliases: [],        // live shell aliases, read fresh at startup (not persisted)
   selectedHostId: null,
   selectedSnippetId: null,
   tabs: [],            // { sessionId, hostLabel, term, fit, el, tabEl, alive }
@@ -462,19 +463,21 @@ function makeRow({ title, subtitle, selected, onOpen, onEdit, theme }) {
     Object.assign(document.createElement('span'), { className: 'item-sub', textContent: subtitle })
   );
 
-  const edit = document.createElement('button');
-  edit.type = 'button';
-  edit.className = 'item-edit';
-  edit.title = 'Edit (e)';
-  edit.textContent = '\u270e';
-  edit.addEventListener('click', (event) => { event.stopPropagation(); onEdit(); });
-  edit.addEventListener('dblclick', (event) => event.stopPropagation());
-
-  li.append(main, edit);
-  li.addEventListener('contextmenu', (event) => { event.preventDefault(); onEdit(); });
+  li.append(main);
+  if (onEdit) {
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'item-edit';
+    edit.title = 'Edit (e)';
+    edit.textContent = '\u270e';
+    edit.addEventListener('click', (event) => { event.stopPropagation(); onEdit(); });
+    edit.addEventListener('dblclick', (event) => event.stopPropagation());
+    li.append(edit);
+    li.addEventListener('contextmenu', (event) => { event.preventDefault(); onEdit(); });
+  }
   li.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); onOpen(); }
-    else if (event.key === 'e' || event.key === 'F2') { event.preventDefault(); onEdit(); }
+    else if (onEdit && (event.key === 'e' || event.key === 'F2')) { event.preventDefault(); onEdit(); }
   });
   return li;
 }
@@ -558,8 +561,11 @@ function renderSnippets() {
   const matches = state.snippets.filter((s) =>
     !needle || `${s.name} ${s.command} ${s.tags || ''}`.toLowerCase().includes(needle));
 
+  const aliasMatches = state.aliases.filter((a) =>
+    !needle || `${a.name} ${a.command}`.toLowerCase().includes(needle));
+
   el.snippetList.replaceChildren();
-  if (!matches.length) {
+  if (!matches.length && !aliasMatches.length) {
     el.snippetList.append(emptyNote(
       state.snippets.length ? 'No snippets match that filter.' : 'No snippets yet \u2014 press + to add one.'));
     return;
@@ -579,6 +585,24 @@ function renderSnippets() {
     });
     row.addEventListener('dblclick', () => runSnippet(snippet));
     el.snippetList.append(row);
+  }
+
+  // Live shell aliases: not saved, not editable. Double-click pastes the alias's
+  // expansion into the active session, same as a snippet.
+  if (aliasMatches.length) {
+    el.snippetList.append(Object.assign(document.createElement('li'),
+      { className: 'group-label', textContent: 'Shell aliases' }));
+    for (const alias of aliasMatches.sort(byText((a) => a.name))) {
+      const run = () => runSnippet({ name: alias.name, command: alias.command });
+      const row = makeRow({
+        title: alias.name,
+        subtitle: alias.command,
+        onOpen: run
+      });
+      row.addEventListener('click', () => selectRow(el.snippetList, row));
+      row.addEventListener('dblclick', run);
+      el.snippetList.append(row);
+    }
   }
 }
 
@@ -1325,12 +1349,65 @@ el.hostFilter.addEventListener('keydown', (event) => {
   if (first) first.dispatchEvent(new MouseEvent('dblclick'));
 });
 
-window.addEventListener('resize', () => {
+function refitActiveTerminal() {
   const tab = state.tabs.find((t) => t.sessionId === state.activeSessionId);
   if (!tab) return;
   tab.fit.fit();
   window.api.session.resize(tab.sessionId, tab.term.cols, tab.term.rows);
-});
+}
+
+window.addEventListener('resize', refitActiveTerminal);
+
+// ---------------------------------------------------------------- sidebar resize
+
+(function initSidebarResize() {
+  const DEFAULT_WIDTH = 272;
+  const sidebar = document.querySelector('.sidebar');
+  const handle = document.getElementById('sidebar-resizer');
+  if (!sidebar || !handle) return;
+
+  const clamp = (w) => Math.max(180, Math.min(w, Math.round(window.innerWidth * 0.7)));
+
+  function applyWidth(w, persist) {
+    const width = clamp(w);
+    sidebar.style.width = width + 'px';
+    if (persist) {
+      try { localStorage.setItem('sidebarWidth', String(width)); } catch { /* ignore */ }
+    }
+    refitActiveTerminal();
+  }
+
+  // Restore a saved width on load.
+  try {
+    const saved = parseInt(localStorage.getItem('sidebarWidth'), 10);
+    if (Number.isFinite(saved)) sidebar.style.width = clamp(saved) + 'px';
+  } catch { /* ignore */ }
+
+  let dragging = false;
+  handle.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    dragging = true;
+    handle.classList.add('is-dragging');
+    document.body.classList.add('is-resizing');
+  });
+
+  window.addEventListener('mousemove', (event) => {
+    if (!dragging) return;
+    // Width is the pointer's distance from the sidebar's left edge.
+    applyWidth(event.clientX - sidebar.getBoundingClientRect().left, false);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('is-dragging');
+    document.body.classList.remove('is-resizing');
+    try { localStorage.setItem('sidebarWidth', String(parseInt(sidebar.style.width, 10))); } catch { /* ignore */ }
+  });
+
+  // Double-click the handle to snap back to the default width.
+  handle.addEventListener('dblclick', () => applyWidth(DEFAULT_WIDTH, true));
+})();
 
 window.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey && event.shiftKey)) return;
@@ -1349,4 +1426,13 @@ window.addEventListener('keydown', (event) => {
   } catch (err) {
     setStatus(err.message, 'error');
   }
+
+  // Pick up live shell aliases once at startup; failure is non-fatal.
+  try {
+    const result = await window.api.aliases.read();
+    if (result && result.ok && Array.isArray(result.value)) {
+      state.aliases = result.value;
+      renderSnippets();
+    }
+  } catch { /* aliases are a convenience; ignore read failures */ }
 })();
