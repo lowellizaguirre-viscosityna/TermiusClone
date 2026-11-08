@@ -112,11 +112,10 @@ ipcMain.handle('keys:pick', wrap(async () => {
     defaultPath: path.join(os.homedir(), '.ssh'),
     buttonLabel: 'Use this key',
     // showHiddenFiles matters: keys normally live in the hidden ~/.ssh
-    properties: ['openFile', 'showHiddenFiles', 'dontAddToRecent'],
-    filters: [
-      { name: 'Key files', extensions: ['pem', 'key', 'ppk'] },
-      { name: 'All files', extensions: ['*'] }
-    ]
+    properties: ['openFile', 'showHiddenFiles', 'dontAddToRecent']
+    // No filters: on Linux (GTK/portal) a wildcard filter becomes a "*.*" pattern
+    // that hides extensionless OpenSSH keys (e.g. id_ed25519). An unfiltered
+    // chooser shows every file so dotless private keys are selectable.
   });
   if (result.canceled || !result.filePaths.length) return null;
   return sshcmd.inspectIdentity(result.filePaths[0]);

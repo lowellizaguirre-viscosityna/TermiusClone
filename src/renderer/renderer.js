@@ -339,8 +339,24 @@ const state = {
   selectedHostId: null,
   selectedSnippetId: null,
   tabs: [],            // { sessionId, hostLabel, term, fit, el, tabEl, alive }
-  activeSessionId: null
+  activeSessionId: null,
+  collapsedGroups: loadCollapsedGroups()
 };
+
+function loadCollapsedGroups() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
+  } catch { return new Set(); }
+}
+
+function toggleGroup(group) {
+  if (state.collapsedGroups.has(group)) state.collapsedGroups.delete(group);
+  else state.collapsedGroups.add(group);
+  try {
+    localStorage.setItem('collapsedGroups', JSON.stringify([...state.collapsedGroups]));
+  } catch { /* ignore */ }
+  renderHosts();
+}
 
 const $ = (sel) => document.querySelector(sel);
 const el = {
@@ -489,16 +505,33 @@ function renderHosts() {
 
   const groups = new Map();
   for (const host of matches) {
-    const key = host.group || 'Ungrouped';
+    const key = (host.group || '').trim().toLowerCase() || 'Ungrouped';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(host);
   }
 
   for (const [group, hosts] of [...groups].sort(byText((g) => g[0]))) {
-    if (groups.size > 1 || group !== 'Ungrouped') {
-      el.hostList.append(Object.assign(document.createElement('li'),
-        { className: 'group-label', textContent: group }));
+    const showHeader = groups.size > 1 || group !== 'Ungrouped';
+    const collapsed = showHeader && state.collapsedGroups.has(group);
+    if (showHeader) {
+      const header = Object.assign(document.createElement('li'), {
+        className: 'group-label' + (collapsed ? ' is-collapsed' : ''),
+        tabIndex: 0,
+        role: 'button',
+        ariaExpanded: String(!collapsed)
+      });
+      header.append(
+        Object.assign(document.createElement('span'), { className: 'group-caret', textContent: '▾' }),
+        Object.assign(document.createElement('span'), { className: 'group-name', textContent: group }),
+        Object.assign(document.createElement('span'), { className: 'group-count', textContent: String(hosts.length) })
+      );
+      header.addEventListener('click', () => toggleGroup(group));
+      header.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(group); }
+      });
+      el.hostList.append(header);
     }
+    if (collapsed) continue;
     for (const host of hosts.sort(byText((h) => h.label || h.hostname))) {
       const row = makeRow({
         title: host.label || host.hostname || '(unnamed host)',
@@ -815,6 +848,10 @@ async function reconnectTab(tab, host) {
   tab.hostLabel = host.label;
   tab.alive = true;
   tab.tabEl.classList.remove('is-dead');
+  // Undo the read-only/hidden-cursor state applied when the previous session died.
+  tab.term.options.disableStdin = false;
+  tab.term.options.cursorBlink = true;
+  tab.term.options.cursorInactiveStyle = 'outline';
   tab.term.write('\r\n\x1b[90m[reconnected]\x1b[0m\r\n');
 
   activate(tab.sessionId);
@@ -974,6 +1011,20 @@ window.api.session.onExit(({ sessionId, exitCode, signal, reason, reasonCode }) 
   tab.alive = false;
   tab.tabEl.classList.add('is-dead');
 
+  // A dead terminal must not keep keyboard focus: xterm's hidden textarea would
+  // otherwise swallow typing (e.g. in the host dialog opened right after a bad
+  // password) until the app is restarted. Release focus back to the document.
+  try {
+    tab.term.blur();
+    tab.el.querySelector('textarea')?.blur();
+    if (tab.el.contains(document.activeElement)) document.activeElement.blur();
+    // A dead pane accepts no input: make it read-only and hide the cursor so it
+    // is visibly inert and can never swallow keystrokes again.
+    tab.term.options.disableStdin = true;
+    tab.term.options.cursorBlink = false;
+    tab.term.options.cursorInactiveStyle = 'none';
+  } catch { /* best effort */ }
+
   // The exit status alone is the whole error message under sshpass, so always
   // print the explanation next to it rather than leaving a bare number.
   const label = signal ? `signal ${signal}` : `exit ${exitCode}`;
@@ -1017,6 +1068,9 @@ function syncAuthFields() {
 let editingHostId = null;
 
 function openHostDialog(host) {
+  // Release any lingering focus (e.g. a dead terminal's textarea) so the modal's
+  // fields are reliably editable.
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   editingHostId = host ? host.id : null;
   const form = el.hostForm;
   form.reset();

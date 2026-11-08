@@ -58,8 +58,23 @@ html, body {
 .list { flex: 1; margin: 0; padding: 0 8px 8px; list-style: none; overflow-y: auto; min-height: 0; }
 
 .group-label {
+  display: flex; align-items: center; gap: 5px;
   padding: 10px 6px 4px; font-size: 10px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--text-dim);
+  cursor: pointer; user-select: none; border-radius: var(--radius);
+}
+.group-label:hover { color: var(--text); }
+.group-label:focus-visible { outline: 0; color: var(--text); }
+.group-caret {
+  display: inline-block; font-size: 9px; line-height: 1;
+  transition: transform .12s ease;
+}
+.group-label.is-collapsed .group-caret { transform: rotate(-90deg); }
+.group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.group-count {
+  flex: 0 0 auto; font-size: 9px; letter-spacing: 0;
+  padding: 1px 5px; border-radius: 8px;
+  background: var(--panel-2, rgba(127,127,127,.15)); color: var(--text-dim);
 }
 
 .item {
@@ -196,6 +211,10 @@ input:focus, textarea:focus { outline: 0; border-color: var(--accent); }
 .grid .radios label { flex-direction: row; align-items: center; gap: 5px; color: var(--text); cursor: pointer; }
 .grid .radios input { width: auto; margin: 0; }
 .auth-field.is-hidden { display: none; }
+.grid .auth-row { flex-direction: row; align-items: flex-start; gap: 12px; }
+.grid .auth-user { flex: 0 0 160px; }
+.grid .auth-grow { flex: 1 1 auto; min-width: 0; }
+.grid .auth-caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .grid .col-2 { grid-column: 1 / -1; }
 .grid .label-hint { color: #6b7488; font-weight: 400; }
 .grid .label-hint code { font-size: 10px; padding: 0 3px; }

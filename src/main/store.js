@@ -97,7 +97,7 @@ function normalizeHost(input) {
     authMethod,
     identityFile: String(merged.identityFile || '').trim(),
     passwordCipher: String(input.passwordCipher || ''),
-    group: String(input.group || '').trim(),
+    group: String(input.group || '').trim().toLowerCase(),
     jumpHost: String(merged.jumpHost || '').trim(),
     extraArgs: String(merged.extraArgs || '').trim(),
     forwardAgent: Boolean(merged.forwardAgent),
