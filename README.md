@@ -1,5 +1,7 @@
 # TermiusClone
 
+![TermiusClone screenshot](TermiusClone_screenshot.png)
+
 A small Electron SSH client built around the two Termius features worth having
 without a subscription:
 
