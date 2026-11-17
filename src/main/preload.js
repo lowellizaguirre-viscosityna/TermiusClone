@@ -21,7 +21,8 @@ contextBridge.exposeInMainWorld('api', {
     path: () => ipcRenderer.invoke('config:path'),
     reveal: () => ipcRenderer.invoke('config:reveal'),
     secretsStatus: () => ipcRenderer.invoke('secrets:status'),
-    hasSshpass: () => ipcRenderer.invoke('config:sshpass')
+    hasSshpass: () => ipcRenderer.invoke('config:sshpass'),
+    readme: () => ipcRenderer.invoke('readme:load')
   },
   hosts: {
     save: (host) => ipcRenderer.invoke('hosts:save', host),

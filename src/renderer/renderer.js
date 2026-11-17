@@ -1305,6 +1305,18 @@ function openSnippetDialog(snippet) {
 $('#snippet-new').addEventListener('click', () => openSnippetDialog(null));
 $('#snippet-cancel').addEventListener('click', () => el.snippetDialog.close());
 
+const readmeDialog = $('#readme-dialog');
+$('#help-btn').addEventListener('click', async () => {
+  try {
+    // Pre-rendered HTML from README.md (see scripts/gen-readme.js).
+    $('#readme-body').innerHTML = unwrap(await window.api.config.readme());
+  } catch (err) {
+    $('#readme-body').textContent = `Could not load README.\n\n${err && err.message ? err.message : err}`;
+  }
+  readmeDialog.showModal();
+});
+$('#readme-close').addEventListener('click', () => readmeDialog.close());
+
 el.snippetForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(el.snippetForm).entries());

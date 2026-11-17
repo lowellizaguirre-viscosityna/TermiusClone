@@ -77,6 +77,11 @@ ipcMain.handle('secrets:status', wrap(() => secrets.status()));
 ipcMain.handle('config:sshpass', wrap(() => Boolean(sshcmd.findSshpass())));
 ipcMain.handle('aliases:read', wrap(() => aliases.readAliases()));
 ipcMain.handle('config:reveal', wrap(() => shell.showItemInFolder(store.CONFIG_FILE)));
+ipcMain.handle('readme:load', wrap(() => {
+  // Pre-rendered from README.md by scripts/gen-readme.js.
+  const readmePath = path.join(__dirname, '..', 'renderer', 'readme.html');
+  return require('fs').readFileSync(readmePath, 'utf8');
+}));
 
 ipcMain.handle('hosts:save', wrap((host) => {
   // The renderer sends a plaintext password only when it changed; `undefined`

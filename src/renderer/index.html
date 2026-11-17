@@ -51,6 +51,7 @@
       <div class="tabbar">
         <div id="tabs" class="tabs"></div>
         <select id="theme-switch" class="theme-switch is-hidden" title="Color scheme for this session"></select>
+        <button type="button" id="help-btn" class="help-btn" title="Help — show the README">?</button>
       </div>
       <div id="terminals" class="terminals">
         <div id="empty" class="empty">
@@ -135,6 +136,14 @@
         <button type="submit" class="btn btn-primary">Save</button>
       </menu>
     </form>
+  </dialog>
+
+  <dialog id="readme-dialog" class="dialog readme-dialog">
+    <div class="readme-head">
+      <h2>README</h2>
+      <button type="button" id="readme-close" class="btn btn-ghost">Close</button>
+    </div>
+    <div id="readme-body" class="readme-body markdown"></div>
   </dialog>
 
   <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
